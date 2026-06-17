@@ -1,0 +1,35 @@
+Credit Card Application Form
+
+■ Applicant Information
+Name: David Thompson
+Social Security Number: 612-53-7841
+Phone: (646) 555-3320
+Email: david.thompson@company.com
+Address: 92 Hudson Street, Apt 1205, Jersey City, NJ 07302
+
+■ Employment & Income
+Employer: Anytech Electronics Inc.
+Department: Semiconductor Research
+Title: Senior Research Engineer
+Annual Income: $128,000
+Years Employed: 6
+Employer Tax ID (EIN): 12-3400998
+
+■ Card Information
+Requested Card: AnyCard Premium Platinum
+Annual Fee: $50
+Payment Account: Second National Bank 110-456-789012 (David Thompson)
+Existing Card Number: 4532-7165-9082-3471
+
+■ Existing Card Holdings
+Number of Cards: 3
+Average Monthly Spend: $1,800
+
+■ Income Verification
+2023 Gross Income: $128,000
+Income Tax Paid: $24,300
+
+■ Consent
+I consent to the inquiry and use of my credit information.
+Consent Date: March 18, 2024
+Applicant Signature: David Thompson

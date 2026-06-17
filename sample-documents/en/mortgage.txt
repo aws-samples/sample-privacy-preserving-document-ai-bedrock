@@ -1,0 +1,37 @@
+Mortgage Loan Application
+
+■ Applicant Information
+Name: Jennifer Lopez
+Social Security Number: 487-29-5106
+Phone: (312) 555-4071
+Email: jennifer.lopez@tech.example.com
+Address: 678 Lincoln Park West, Unit 1503, Chicago, IL 60614
+
+■ Income Information
+Employer: AnyTech LLC
+Title: Manager
+Annual Income: $118,000
+Years Employed: 5
+Employer Tax ID (EIN): 36-4512345
+
+■ Collateral Information
+Property Address: 234 Oak Ridge Avenue, Unit 802, Chicago, IL 60611
+Appraised Value: $1,150,000
+Living Area: 915 sq ft
+
+■ Loan Information
+Requested Amount: $480,000
+Term: 30 years
+Repayment: Equal principal and interest
+Rate Type: Adjustable
+
+■ Insurance Eligibility
+Coverage Status: Employer-sponsored
+Effective Date: 2019-08-01
+Employer Name: AnyTech LLC
+
+■ Existing Loans
+Outstanding: Personal loan $28,000 (Online Bank)
+
+Application Date: March 20, 2024
+Applicant Signature: Jennifer Lopez

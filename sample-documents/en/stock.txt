@@ -1,0 +1,38 @@
+Brokerage Account Opening Application
+
+■ Applicant Information
+Name: Emily Rodriguez
+Social Security Number: 559-71-2048
+Phone: (206) 555-8812
+Email: emily.rodriguez@company.example.com
+Address: 789 Pine Street, Unit 2103, Seattle, WA 98101
+
+■ Employment & Income
+Occupation: Certified Public Accountant
+Employer: Anyfirm Advisory LLP
+Annual Income: $145,000
+
+■ Investor Profile
+Financial Assets: $320,000
+Equity Investing Experience: 5 years
+Derivatives Experience: 2 years
+Risk Profile: Aggressive
+Investment Objective: Capital growth
+Acceptable Loss: Up to 20% of principal
+
+■ Account Information
+Brokerage: AnySec Securities
+Account Type: Comprehensive Investment Account
+Linked Bank Account: Third National Bank 1002-456-789012 (Emily Rodriguez)
+
+■ Foreign Securities Trading
+W-9 Submitted: Yes (U.S. taxpayer)
+Taxpayer ID Type: SSN
+
+■ Business Information
+Employer Tax ID (EIN): 10-6878901
+Business Name: Rodriguez Accounting LLC
+
+I confirm the above is accurate and acknowledge the investment risks.
+Application Date: March 22, 2024
+Applicant Signature: Emily Rodriguez

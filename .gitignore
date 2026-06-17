@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+
+# Node / CDK
+node_modules/
+cdk.out/
+*.js
+*.d.ts
+!jest.config.js
+
+# Env / secrets
+.env
+.env.*
+*.pem
+.aws/
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/

@@ -1,0 +1,36 @@
+Insurance Application Form
+
+■ Applicant Information
+Name: Michael Carter
+Social Security Number: 521-84-6390
+Phone: (415) 555-2389
+Email: michael.carter@email.com
+Address: 1420 Sutter Street, Apt 302, San Francisco, CA 94109
+
+■ Health Disclosure
+Diagnosis: Hypertension (diagnosed 2023)
+Current Medication: Amlodipine 5mg (daily)
+Family History: Father - diabetes, Mother - hypertension
+
+■ Policy Information
+Product: AnyLife Comprehensive Health Plus
+Premium: $135 / month
+Coverage Term: 20 years (until age 65)
+Riders: Medical expense, Critical illness, Cerebrovascular
+
+■ Beneficiary Information
+Beneficiary: Sarah Carter (Spouse)
+Beneficiary Phone: (415) 555-7744
+
+■ Income Information
+Employer: Anytech Electronics Inc.
+Title: Senior Manager
+Annual Income: $92,000
+Years Employed: 8
+
+■ Payment Information
+Auto-debit Account: First National Bank 123-456-789012 (Michael Carter)
+
+I certify that the information above is true and correct.
+Application Date: March 15, 2024
+Applicant Signature: Michael Carter

@@ -1,0 +1,42 @@
+# Local development stack: orchestrator + pii-service.
+#
+# Prerequisites NOT started here (provide them yourself):
+#   - A vLLM endpoint serving the PII-detection sLLM (see SLLM_ENDPOINT).
+#     e.g. on a GPU host:  vllm serve Qwen/Qwen3-8B --port 8000
+#   - AWS credentials with Bedrock (invoke_model, apply_guardrail) + DynamoDB access.
+#   - A DynamoDB table for PII mappings (see deploy/cdk or the README).
+#
+# Run:  docker compose -f deploy/docker-compose.yml up --build
+
+services:
+  pii-service:
+    build: ../src/pii-service
+    ports:
+      - "8082:8082"
+    environment:
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      PII_TABLE: ${PII_TABLE:-pii-mappings}
+      GUARDRAIL_ID: ${GUARDRAIL_ID:-}        # optional — /guardrails passes through when empty
+      GUARDRAIL_VERSION: ${GUARDRAIL_VERSION:-DRAFT}
+    volumes:
+      - ~/.aws:/root/.aws:ro                  # mount AWS credentials (or use env/role)
+
+  orchestrator:
+    build: ../src/orchestrator
+    ports:
+      - "8080:8080"
+    depends_on:
+      - pii-service
+    environment:
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      MODEL_ID: ${MODEL_ID:-global.anthropic.claude-sonnet-4-6}
+      PII_SERVICE_URL: http://pii-service:8082
+      # Point this at YOUR vLLM endpoint. host.docker.internal reaches the host from the container.
+      SLLM_ENDPOINT: ${SLLM_ENDPOINT:-http://host.docker.internal:8000}
+      SLLM_MODEL_NAME: ${SLLM_MODEL_NAME:-Qwen/Qwen3-8B}
+      QWEN_CACHE_TABLE: ${QWEN_CACHE_TABLE:-}  # optional result cache; empty = disabled
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:3000}
+    volumes:
+      - ~/.aws:/root/.aws:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
