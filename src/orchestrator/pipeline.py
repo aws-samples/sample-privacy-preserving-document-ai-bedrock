@@ -32,9 +32,8 @@ from typing import Awaitable, Callable
 
 import boto3
 import httpx
-from botocore.config import Config as _BotoConfig
-
 import prompts
+from botocore.config import Config as _BotoConfig
 
 logger = logging.getLogger("orchestrator.pipeline")
 
@@ -46,7 +45,16 @@ EmitFn = Callable[[str, dict], Awaitable[None]]
 
 # ── Configuration (environment, with neutral defaults) ──────────────────────
 AWS_REGION = os.environ.get("AWS_REGION", "us-east-1")
-BEDROCK_MODEL_ID = os.environ.get("MODEL_ID", "global.anthropic.claude-sonnet-4-6")
+BEDROCK_MODEL_ID = os.environ.get("MODEL_ID", "global.anthropic.claude-sonnet-5")
+
+# Optional — attaches the same Bedrock Guardrail to the direct invoke_model call
+# in Stage 6, in addition to the out-of-band ApplyGuardrail check the pii-service
+# already runs in Stage 4. This is defense-in-depth, not a substitute: Stage 4
+# checks the text *before* it is sent; this checks the model invocation itself,
+# which also covers PII the model might echo back into its own output. Leave
+# unset to skip (the pipeline still runs Stage 4 either way).
+GUARDRAIL_ID_FOR_INVOKE = os.environ.get("GUARDRAIL_ID", "")
+GUARDRAIL_VERSION_FOR_INVOKE = os.environ.get("GUARDRAIL_VERSION", "")
 
 PII_SERVICE_URL = os.environ.get("PII_SERVICE_URL", "http://localhost:8082")
 SLLM_ENDPOINT = os.environ.get("SLLM_ENDPOINT", "http://localhost:8000")
@@ -70,9 +78,11 @@ http_client = httpx.AsyncClient(timeout=httpx.Timeout(connect=10.0, read=180.0, 
 
 
 # Map a full Bedrock model id to a short label for display, e.g.
-# ``global.anthropic.claude-sonnet-4-6`` -> ``sonnet-4.6``.
+# ``global.anthropic.claude-sonnet-5`` -> ``sonnet-5``, and
+# ``global.anthropic.claude-sonnet-4-6`` -> ``sonnet-4.6`` (older generations
+# carry a minor version segment; newer ones don't).
 _MODEL_ALIAS_PATTERN = re.compile(
-    r"(?:global|us|apac|eu)\.anthropic\.claude-(sonnet|opus|haiku)-(\d)-(\d)(?:-.*)?$"
+    r"(?:global|us|apac|eu)\.anthropic\.claude-(sonnet|opus|haiku)-(\d)(?:-(\d))?(?:-.*)?$"
 )
 
 
@@ -81,7 +91,8 @@ def _short_model_alias(model_id: str) -> str:
         return model_id
     m = _MODEL_ALIAS_PATTERN.match(model_id)
     if m:
-        return f"{m.group(1)}-{m.group(2)}.{m.group(3)}"
+        family, major, minor = m.group(1), m.group(2), m.group(3)
+        return f"{family}-{major}.{minor}" if minor else f"{family}-{major}"
     return model_id
 
 
@@ -346,6 +357,57 @@ async def _detect_sllm(raw_text: str, lang: str) -> dict:
         return {"error": str(e), "pii_list": []}
 
 
+# ── Masking-residue gate ─────────────────────────────────────────────────────
+def _detect_masking_residue(text: str, pii_data: dict) -> set:
+    """Check whether any known original PII value survived masking.
+
+    This runs against ``pii_data`` — the same token -> original mapping Stage 5
+    stores — not against a PII-shape heuristic, so it cannot false-positive on
+    text that merely *looks* like PII. Two checks:
+
+      (a) the full original value (2+ chars) appears verbatim in ``text``.
+      (b) a 5+ digit run *derived from* an original value (e.g. the tail of a
+          national ID or account number) appears as a substring in ``text`` —
+          catches partial tokenization where only part of a fixed-format ID
+          got masked.
+
+    Returns the set of token names with suspected residue (never the original
+    values themselves — callers may log this set). An empty result does not
+    guarantee zero residue (this is a best-effort net, not a formal proof), but
+    any hit is a real signal that Stage 3 masking was incomplete.
+    """
+    residue: set = set()
+    for token, original in pii_data.items():
+        original_s = str(original)
+        if len(original_s) >= 2 and original_s in text:
+            residue.add(token)
+            continue
+        for run in re.findall(r"\d{5,}", original_s):
+            if run in text:
+                residue.add(token)
+                break
+    return residue
+
+
+def _assert_no_masking_residue(stage_label: str, text: str, pii_data: dict) -> None:
+    """Abort the pipeline if any known PII value survived masking.
+
+    Called before every point where text leaves this trust boundary (Stage 4's
+    call to the managed Guardrails API, and Stage 6's call to Bedrock). Amazon
+    Bedrock Guardrails is a second line of defense, not a substitute for
+    complete Stage 3 masking — this gate is what actually enforces "the large
+    model never sees PII" when Stage 3 missed something.
+    """
+    residue = _detect_masking_residue(text, pii_data)
+    if residue:
+        raise RuntimeError(
+            f"masking residue detected before {stage_label}: {len(residue)} "
+            f"token(s) still have their original value present in the text "
+            f"(tokens: {sorted(residue)[:5]}) — aborting rather than risk "
+            f"forwarding unmasked PII"
+        )
+
+
 # ── Stage 3: optional L2 result cache (DynamoDB) ────────────────────────────
 _PROMPT_FINGERPRINT = {
     lang: hashlib.sha256(p.encode()).hexdigest()[:8] for lang, p in prompts.PII_PROMPTS.items()
@@ -463,13 +525,16 @@ async def _bedrock_analysis(scenario_id: str, anonymized_text: str, lang: str, e
     await emit("BEDROCK_INPUT", {"anonymizedText": user_prompt})
 
     try:
-        response = await asyncio.to_thread(
-            bedrock_runtime.invoke_model,
+        invoke_kwargs = dict(
             modelId=BEDROCK_MODEL_ID,
             contentType="application/json",
             accept="application/json",
             body=request_body.encode("utf-8"),
         )
+        if GUARDRAIL_ID_FOR_INVOKE and GUARDRAIL_VERSION_FOR_INVOKE:
+            invoke_kwargs["guardrailIdentifier"] = GUARDRAIL_ID_FOR_INVOKE
+            invoke_kwargs["guardrailVersion"] = GUARDRAIL_VERSION_FOR_INVOKE
+        response = await asyncio.to_thread(bedrock_runtime.invoke_model, **invoke_kwargs)
         response_body = json.loads(response["body"].read().decode("utf-8"))
         content_blocks = response_body.get("content") or []
         if not content_blocks:
@@ -505,7 +570,16 @@ async def _bedrock_analysis(scenario_id: str, anonymized_text: str, lang: str, e
 
 # ── Stages 4, 5, 7: thin pii-service calls ──────────────────────────────────
 async def _stage_guardrails(masked_text: str, emit: EmitFn) -> dict:
-    """Stage 4: double-check the masked text with Bedrock Guardrails (non-fatal)."""
+    """Stage 4: double-check the masked text with Bedrock Guardrails (non-fatal).
+
+    Three distinct outcomes are reported, and treated as three distinct things —
+    a "successful" pipeline run can still be running degraded or unconfigured:
+      - ``skipped``  — GUARDRAIL_ID is not set; the pii-service never called AWS.
+      - ``degraded`` — the pii-service called Guardrails and it failed (bad ARN,
+        missing permissions, throttling, network error); the masked text passes
+        through unverified.
+      - neither      — Guardrails ran and verified the text.
+    """
     await emit("GUARDRAIL_START", {})
     try:
         resp = await http_client.post(f"{PII_SERVICE_URL}/guardrails", json={"masked_text": masked_text})
@@ -513,12 +587,16 @@ async def _stage_guardrails(masked_text: str, emit: EmitFn) -> dict:
         await emit("GUARDRAIL_COMPLETE", {
             "extraPiiFound": len(result.get("extra_pii", [])),
             "skipped": result.get("skipped", False),
+            "degraded": result.get("degraded", False),
         })
         return result
     except Exception as e:
+        # A transport-level failure (the pii-service itself unreachable) is the
+        # same "degraded" outcome as a Guardrails-API failure the pii-service
+        # already caught — either way the text passes through unverified.
         logger.warning("Guardrails call failed, proceeding (degraded): %s", e)
         await emit("GUARDRAIL_COMPLETE", {"degraded": True, "error": str(e)})
-        return {"extra_pii": [], "verified_text": masked_text}
+        return {"extra_pii": [], "verified_text": masked_text, "degraded": True}
 
 
 async def _stage_store(session_id: str, scenario_id: str, pii_data: dict, emit: EmitFn) -> int:
@@ -591,9 +669,17 @@ async def run_pipeline(
         "cacheHit": detect_result.get("cache_hit", False),
     })
 
+    # Gate: refuse to send anything past this point to an external API (the
+    # Guardrails managed endpoint, then Bedrock) if masking is incomplete.
+    _assert_no_masking_residue("Stage 4 (Guardrails)", masked_text, pii_data)
+
     # Stage 4: Guardrails verification
     guard_result = await _stage_guardrails(masked_text, _emit)
     anonymized_text = guard_result.get("verified_text", masked_text)
+
+    # Same gate again on Guardrails' own output — it may rewrite the text, and
+    # a rewrite is exactly the kind of change this check exists to catch.
+    _assert_no_masking_residue("Stage 6 (Bedrock analysis)", anonymized_text, pii_data)
 
     # Stage 5: store PII mappings
     stored_count = await _stage_store(session_id, scenario_id, pii_data, _emit)
@@ -610,6 +696,8 @@ async def run_pipeline(
     summary = {
         "piiDetected": detect_result.get("pii_count", len(pii_data)),
         "guardrailsExtra": len(guard_result.get("extra_pii", [])),
+        "guardrailsSkipped": guard_result.get("skipped", False),
+        "guardrailsDegraded": guard_result.get("degraded", False),
         "piiStored": stored_count,
         "reassembledTokens": reassembly_result.get("replaced_count", 0),
         "totalTimeMs": elapsed_ms,

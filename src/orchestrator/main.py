@@ -10,13 +10,12 @@ Exposes the privacy-preserving pipeline as a simple REST API:
 import logging
 import os
 
+import prompts
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
-
-import prompts
 from pipeline import VALID_SCENARIOS, run_pipeline
+from pydantic import BaseModel, Field
 
 logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO"))
 

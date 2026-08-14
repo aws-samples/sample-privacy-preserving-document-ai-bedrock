@@ -55,6 +55,19 @@ export class PrivacyPreservingDocAiStack extends cdk.Stack {
             action: "ANONYMIZE",
             description: "Korean resident registration number",
           },
+          {
+            name: "KR_ACCOUNT",
+            // Korean bank account numbers are hyphen-segmented, and the
+            // segment lengths vary by bank (3, 4, or up to 16+ digits in the
+            // first segment; 1-4 trailing segments). This alternation covers
+            // the common shapes without also matching a plain calendar date
+            // (which CREDIT_DEBIT_CARD_NUMBER-style single "\d+-\d+" patterns
+            // tend to do).
+            pattern:
+              "(\\d{7,16}-\\d{2,6}-\\d{2,14}(-\\d{1,14})*|\\d{5,6}-\\d{2,6}-\\d{2,14}(-\\d{1,14})*|\\d{3,4}-\\d{3,6}-\\d{2,14}(-\\d{1,14})*|\\d{4}-\\d{2}-\\d{3,14}(-\\d{1,14})*|\\d{3}-\\d{2}-\\d{4,14}(-\\d{1,14})*)",
+            action: "ANONYMIZE",
+            description: "Korean bank account number (hyphen-segmented, several bank formats)",
+          },
         ],
       },
     });

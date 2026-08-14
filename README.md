@@ -64,7 +64,9 @@ tests/              pure-function unit tests (no AWS/network needed)
      --time-to-live-specification "Enabled=true,AttributeName=ttl"
    ```
 4. *(Optional)* **A Bedrock Guardrail** for Stage 4. If `GUARDRAIL_ID` is unset, Stage 4
-   passes through (the pipeline still runs).
+   passes through (the pipeline still runs). If you do set it, also set
+   `GUARDRAIL_VERSION` — the pii-service refuses to start with one set and not
+   the other.
 
 ## Provision infrastructure (optional, CDK)
 
@@ -81,6 +83,7 @@ Outputs include the table names and the Guardrail ID to plug into the env below.
 # 1. Make sure your vLLM endpoint and AWS credentials are available.
 export AWS_REGION=us-east-1
 export GUARDRAIL_ID=<your-guardrail-id>      # optional
+export GUARDRAIL_VERSION=<version>           # required if GUARDRAIL_ID is set
 export SLLM_ENDPOINT=http://host.docker.internal:8000
 
 # 2. Start both services.
@@ -129,12 +132,13 @@ Response (abridged):
 | Variable | Service | Default | Purpose |
 |----------|---------|---------|---------|
 | `AWS_REGION` | both | `us-east-1` | AWS region |
-| `MODEL_ID` | orchestrator | `global.anthropic.claude-sonnet-4-6` | Bedrock model for analysis |
+| `MODEL_ID` | orchestrator | `global.anthropic.claude-sonnet-5` | Bedrock model for analysis |
 | `SLLM_ENDPOINT` | orchestrator | `http://localhost:8000` | vLLM OpenAI-compatible endpoint |
 | `SLLM_MODEL_NAME` | orchestrator | `Qwen/Qwen3-8B` | sLLM model name |
 | `PII_SERVICE_URL` | orchestrator | `http://localhost:8082` | pii-service URL |
 | `QWEN_CACHE_TABLE` | orchestrator | *(empty = disabled)* | optional DynamoDB result cache |
-| `GUARDRAIL_ID` | pii-service | *(empty = skip)* | Bedrock Guardrail id |
+| `GUARDRAIL_ID` | both | *(empty = skip)* | Bedrock Guardrail id — pii-service uses it for Stage 4 `ApplyGuardrail`; the orchestrator, if also set, attaches the same guardrail to the Stage 6 `invoke_model` call as defense-in-depth |
+| `GUARDRAIL_VERSION` | both | *(empty)* | Guardrail version to verify against. Required if `GUARDRAIL_ID` is set — the pii-service refuses to start on a half-configured pair rather than silently defaulting to `"DRAFT"` |
 | `PII_TABLE` | pii-service | `pii-mappings` | DynamoDB table for mappings |
 | `PII_TTL_SECONDS` | pii-service | `3600` | TTL for stored mappings |
 
@@ -180,6 +184,15 @@ cd deploy/cdk && npx cdk destroy
 
 - The pipeline aborts Stage 3 if too many detection chunks fail, rather than risk
   forwarding unmasked text to the large model.
+- Before both Stage 4 (Guardrails) and Stage 6 (Bedrock), a masking-residue check
+  re-scans the text against the known token → original mapping and aborts the
+  pipeline if any original value is still present — Guardrails is a second line
+  of defense, not a substitute for Stage 3 catching everything itself.
+- Stage 4's outcome is reported as one of three distinct states: verified,
+  `skipped` (Guardrail not configured — never called AWS), or `degraded`
+  (Guardrail was configured but the call failed) — the latter two both mean the
+  text reached Bedrock *unverified* by Guardrails, which is worth knowing even
+  though the pipeline still completes either way.
 - Stored PII mappings carry a short TTL; restoration is a pure string operation that
   never re-invokes the model.
 - The minimal IAM policy in the CDK stack uses `bedrock:InvokeModel` on `*` for

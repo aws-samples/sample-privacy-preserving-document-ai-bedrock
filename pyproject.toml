@@ -1,0 +1,13 @@
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.lint]
+# Correctness and import hygiene only. Stylistic-opinion rules (blind-except,
+# nested-if, dict-literal-vs-call, etc.) are intentionally not enabled — this
+# codebase's try/except/log-and-continue pattern (Stage 3/4 non-fatal-failure
+# handling) is a deliberate design choice, not an oversight for a linter to flag.
+select = ["E", "F", "I"]
+# Long lines are unavoidable in prompts.py's detection/analysis prompt text
+# (long Korean/English sentences, kept on one line for readability of the
+# prompt itself rather than the source file).
+ignore = ["E501"]
