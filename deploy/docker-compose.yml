@@ -1,4 +1,4 @@
-# Local development stack: orchestrator + pii-service.
+# Local development stack: ocr-service + orchestrator + pii-service.
 #
 # Prerequisites NOT started here (provide them yourself):
 #   - A vLLM endpoint serving the PII-detection sLLM (see SLLM_ENDPOINT).
@@ -6,9 +6,23 @@
 #   - AWS credentials with Bedrock (invoke_model, apply_guardrail) + DynamoDB access.
 #   - A DynamoDB table for PII mappings (see deploy/cdk or the README).
 #
+# ocr-service defaults to OCR_ENGINE=paddleocr (CPU) — no GPU needed for this
+# stack to reproduce the full pipeline end to end via /pipeline/run-file. Set
+# OCR_ENGINE=paddleocr-vl + PADDLE_VL_ENDPOINT to use the GPU engine instead
+# (see deploy/ocr-gpu/ and the README's "GPU OCR" section — it costs real money).
+#
 # Run:  docker compose -f deploy/docker-compose.yml up --build
 
 services:
+  ocr-service:
+    build: ../src/ocr-service
+    ports:
+      - "8083:8083"
+    environment:
+      OCR_ENGINE: ${OCR_ENGINE:-paddleocr}
+      OCR_LANG: ${OCR_LANG:-korean}
+      PADDLE_VL_ENDPOINT: ${PADDLE_VL_ENDPOINT:-}
+
   pii-service:
     build: ../src/pii-service
     ports:
@@ -17,7 +31,7 @@ services:
       AWS_REGION: ${AWS_REGION:-us-east-1}
       PII_TABLE: ${PII_TABLE:-pii-mappings}
       GUARDRAIL_ID: ${GUARDRAIL_ID:-}        # optional — /guardrails passes through when empty
-      GUARDRAIL_VERSION: ${GUARDRAIL_VERSION:-DRAFT}
+      GUARDRAIL_VERSION: ${GUARDRAIL_VERSION:-}  # required if GUARDRAIL_ID is set
     volumes:
       - ~/.aws:/root/.aws:ro                  # mount AWS credentials (or use env/role)
 
@@ -26,15 +40,19 @@ services:
     ports:
       - "8080:8080"
     depends_on:
+      - ocr-service
       - pii-service
     environment:
       AWS_REGION: ${AWS_REGION:-us-east-1}
-      MODEL_ID: ${MODEL_ID:-global.anthropic.claude-sonnet-4-6}
+      MODEL_ID: ${MODEL_ID:-global.anthropic.claude-sonnet-5}
+      OCR_SERVICE_URL: http://ocr-service:8083
       PII_SERVICE_URL: http://pii-service:8082
       # Point this at YOUR vLLM endpoint. host.docker.internal reaches the host from the container.
       SLLM_ENDPOINT: ${SLLM_ENDPOINT:-http://host.docker.internal:8000}
       SLLM_MODEL_NAME: ${SLLM_MODEL_NAME:-Qwen/Qwen3-8B}
       QWEN_CACHE_TABLE: ${QWEN_CACHE_TABLE:-}  # optional result cache; empty = disabled
+      GUARDRAIL_ID: ${GUARDRAIL_ID:-}          # optional — attaches to the Stage 6 invoke_model call too
+      GUARDRAIL_VERSION: ${GUARDRAIL_VERSION:-}
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:3000}
     volumes:
       - ~/.aws:/root/.aws:ro

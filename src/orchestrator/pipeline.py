@@ -1,9 +1,11 @@
 """
-Privacy-preserving document-AI pipeline (post-OCR).
+Privacy-preserving document-AI pipeline.
 
-Given OCR'd text, this orchestrator runs five stages so that a large model only
+Given a document, this orchestrator runs six stages so that a large model only
 ever sees anonymized text:
 
+  Stage 2  OCR              — the ocr-service extracts text (and layout) from a PDF.
+                              (Skippable: run_pipeline() takes already-OCR'd text directly.)
   Stage 3  PII detection    — an sLLM (Qwen via vLLM) + regex extract PII; the
                               pii-service pseudonymizes it into [PERSON_1]-style tokens.
   Stage 4  Guardrails       — Amazon Bedrock Guardrails double-checks the masked text.
@@ -12,10 +14,12 @@ ever sees anonymized text:
   Stage 7  Reassembly       — tokens in the analysis output are restored by
                               deterministic string replacement (national IDs stay masked).
 
-(Stages 1-2, document load and OCR, are out of scope for this sample — the input is
-already OCR'd text. See ``sample-documents/``.)
+Two entry points:
+  run_pipeline()          Stages 3-7, given already-OCR'd text directly.
+  run_pipeline_from_pdf()  Stage 2 (via the ocr-service), then Stages 3-7.
 
-Stage numbering is preserved from the reference architecture for readability.
+Stage numbering is preserved from the reference architecture for readability
+(there is no "Stage 1" here — document upload/routing is the caller's concern).
 """
 
 from __future__ import annotations
@@ -56,6 +60,7 @@ BEDROCK_MODEL_ID = os.environ.get("MODEL_ID", "global.anthropic.claude-sonnet-5"
 GUARDRAIL_ID_FOR_INVOKE = os.environ.get("GUARDRAIL_ID", "")
 GUARDRAIL_VERSION_FOR_INVOKE = os.environ.get("GUARDRAIL_VERSION", "")
 
+OCR_SERVICE_URL = os.environ.get("OCR_SERVICE_URL", "http://localhost:8083")
 PII_SERVICE_URL = os.environ.get("PII_SERVICE_URL", "http://localhost:8082")
 SLLM_ENDPOINT = os.environ.get("SLLM_ENDPOINT", "http://localhost:8000")
 SLLM_MODEL_NAME = os.environ.get("SLLM_MODEL_NAME", "Qwen/Qwen3-8B")
@@ -713,3 +718,50 @@ async def run_pipeline(
         "summary": summary,
         "events": events,
     }
+
+
+# ── Stage 2: OCR (optional entry point) ─────────────────────────────────────
+async def _stage_ocr(pdf_bytes: bytes, emit: EmitFn) -> dict:
+    """Extract text from a PDF via the ocr-service. Returns its raw JSON response."""
+    await emit("OCR_START", {})
+    resp = await http_client.post(
+        f"{OCR_SERVICE_URL}/parse",
+        files={"file": ("document.pdf", pdf_bytes, "application/pdf")},
+    )
+    if resp.status_code != 200:
+        raise RuntimeError(f"OCR service returned {resp.status_code}: {resp.text[:300]}")
+    result = resp.json()
+    await emit("OCR_COMPLETE", {
+        "engine": result.get("engine", ""),
+        "pageCount": len(result.get("pages", [])),
+        "textLength": len(result.get("text", "")),
+    })
+    return result
+
+
+async def run_pipeline_from_pdf(
+    scenario_id: str,
+    pdf_bytes: bytes,
+    lang: str = prompts.DEFAULT_LANG,
+    emit: EmitFn | None = None,
+) -> dict:
+    """Run Stage 2 (OCR) then delegate Stages 3-7 to ``run_pipeline``.
+
+    Kept as a thin wrapper around ``run_pipeline`` rather than folding OCR into
+    it, so ``run_pipeline`` stays usable with already-OCR'd text and no
+    ocr-service dependency — which is what the existing tests and the
+    plain-text ``/pipeline/run`` API exercise.
+    """
+    ocr_events: list[dict] = []
+
+    async def _emit_ocr(stage: str, data: dict) -> None:
+        event = {"stage": stage, "timestamp": int(time.time() * 1000), "data": data}
+        ocr_events.append(event)
+        if emit is not None:
+            await emit(stage, data)
+
+    ocr_result = await _stage_ocr(pdf_bytes, _emit_ocr)
+    result = await run_pipeline(scenario_id, ocr_result.get("text", ""), lang=lang, emit=emit)
+    result["events"] = ocr_events + result["events"]
+    result["ocr"] = {"engine": ocr_result.get("engine", ""), "pageCount": len(ocr_result.get("pages", []))}
+    return result
