@@ -6,6 +6,13 @@ on:
   pull_request:
 
 jobs:
+  sanitized:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check for forbidden internal references
+        run: bash scripts/check-sanitized.sh
+
   python:
     runs-on: ubuntu-latest
     steps:
