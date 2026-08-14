@@ -1,0 +1,36 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ocr-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: ocr-service }
+  template:
+    metadata:
+      labels: { app: ocr-service }
+    spec:
+      containers:
+        - name: ocr-service
+          image: IMAGE_PLACEHOLDER/ocr-service:latest
+          ports:
+            - containerPort: 8083
+          env:
+            - { name: OCR_ENGINE, value: "paddleocr" }
+            - { name: OCR_LANG, value: "korean" }
+          readinessProbe:
+            httpGet: { path: /health, port: 8083 }
+            initialDelaySeconds: 5
+          resources:
+            requests: { cpu: "500m", memory: "1Gi" }
+            limits: { cpu: "1", memory: "2Gi" }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ocr-service
+spec:
+  selector: { app: ocr-service }
+  ports:
+    - port: 8083
+      targetPort: 8083

@@ -10,6 +10,7 @@ venv/
 # Node / CDK
 node_modules/
 cdk.out/
+cdk.context.json
 *.js
 *.d.ts
 !jest.config.js
