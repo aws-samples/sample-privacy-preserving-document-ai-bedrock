@@ -1,0 +1,34 @@
+# Plain Kubernetes manifests — no Helm, no operator, no GitOps controller.
+# Deploy with: kubectl apply -k deploy/k8s/
+#
+# Before deploying, set your own image references (built from src/ocr-service,
+# src/pii-service, src/orchestrator — e.g. pushed to ECR):
+#   cd deploy/k8s
+#   kustomize edit set image IMAGE_PLACEHOLDER/ocr-service=<your-ecr-repo>/ocr-service:<tag>
+#   kustomize edit set image IMAGE_PLACEHOLDER/pii-service=<your-ecr-repo>/pii-service:<tag>
+#   kustomize edit set image IMAGE_PLACEHOLDER/orchestrator=<your-ecr-repo>/orchestrator:<tag>
+# (`kubectl` >=1.21 has kustomize built in: `kubectl apply -k deploy/k8s/` works
+# without a separate kustomize install; use the standalone `kustomize` binary
+# only for `edit set image` above, or hand-edit the `image:` lines directly.)
+#
+# The optional GPU OCR path (ocr-service-gpu.yaml) is intentionally NOT listed
+# below — see that file's header comment for why and how to add it.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - serviceaccount.yaml
+  - ocr-service.yaml
+  - pii-service.yaml
+  - orchestrator.yaml
+
+images:
+  - name: IMAGE_PLACEHOLDER/ocr-service
+    newName: IMAGE_PLACEHOLDER/ocr-service
+    newTag: latest
+  - name: IMAGE_PLACEHOLDER/pii-service
+    newName: IMAGE_PLACEHOLDER/pii-service
+    newTag: latest
+  - name: IMAGE_PLACEHOLDER/orchestrator
+    newName: IMAGE_PLACEHOLDER/orchestrator
+    newTag: latest

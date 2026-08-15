@@ -3,20 +3,20 @@ Orchestrator service — FastAPI entry point.
 
 Exposes the privacy-preserving pipeline as a simple REST API:
 
-  POST /pipeline/run   run Stages 3-7 on OCR'd text and return the result
-  GET  /health         readiness/liveness probe
+  POST /pipeline/run       run Stages 3-7 on OCR'd text and return the result
+  POST /pipeline/run-file  run Stage 2 (OCR, via the ocr-service) then Stages 3-7 on a PDF
+  GET  /health             readiness/liveness probe
 """
 
 import logging
 import os
 
-from fastapi import FastAPI
+import prompts
+from fastapi import FastAPI, File, Form, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from pipeline import VALID_SCENARIOS, run_pipeline, run_pipeline_from_pdf
 from pydantic import BaseModel, Field
-
-import prompts
-from pipeline import VALID_SCENARIOS, run_pipeline
 
 logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO"))
 
@@ -56,6 +56,26 @@ async def pipeline_run(req: PipelineRequest):
         )
     try:
         result = await run_pipeline(req.scenario, req.text, lang=req.lang)
+        return JSONResponse(result)
+    except Exception as e:
+        logging.exception("pipeline failed")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.post("/pipeline/run-file")
+async def pipeline_run_file(
+    scenario: str = Form(...),
+    lang: str = Form(prompts.DEFAULT_LANG),
+    file: UploadFile = File(...),
+):
+    if scenario not in VALID_SCENARIOS:
+        return JSONResponse(
+            {"error": f"Invalid scenario: {scenario}", "valid": list(VALID_SCENARIOS)},
+            status_code=400,
+        )
+    try:
+        pdf_bytes = await file.read()
+        result = await run_pipeline_from_pdf(scenario, pdf_bytes, lang=lang)
         return JSONResponse(result)
     except Exception as e:
         logging.exception("pipeline failed")

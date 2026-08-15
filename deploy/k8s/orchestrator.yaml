@@ -1,0 +1,49 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: orchestrator
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: orchestrator }
+  template:
+    metadata:
+      labels: { app: orchestrator }
+    spec:
+      serviceAccountName: app-service-account
+      containers:
+        - name: orchestrator
+          image: IMAGE_PLACEHOLDER/orchestrator:latest
+          ports:
+            - containerPort: 8080
+          env:
+            - { name: AWS_REGION, value: "us-east-1" }
+            - { name: MODEL_ID, value: "global.anthropic.claude-sonnet-5" }
+            - { name: OCR_SERVICE_URL, value: "http://ocr-service:8083" }
+            - { name: PII_SERVICE_URL, value: "http://pii-service:8082" }
+            # Point this at your own vLLM endpoint (not deployed by these
+            # manifests — see the README's Prerequisites).
+            - { name: SLLM_ENDPOINT, value: "http://REPLACE_ME:8000" }
+            - { name: SLLM_MODEL_NAME, value: "Qwen/Qwen3-8B" }
+            - { name: GUARDRAIL_ID, value: "" }
+            - { name: GUARDRAIL_VERSION, value: "" }
+            - { name: ALLOWED_ORIGINS, value: "*" }
+          readinessProbe:
+            httpGet: { path: /health, port: 8080 }
+            initialDelaySeconds: 5
+          resources:
+            requests: { cpu: "250m", memory: "512Mi" }
+            limits: { cpu: "500m", memory: "1Gi" }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: orchestrator
+spec:
+  # ClusterIP by default — this sample doesn't pick an ingress controller for
+  # you. Change to LoadBalancer, or put an Ingress in front, to expose it
+  # externally (see the README's "Kubernetes" deploy section).
+  selector: { app: orchestrator }
+  ports:
+    - port: 8080
+      targetPort: 8080

@@ -1,0 +1,42 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pii-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: pii-service }
+  template:
+    metadata:
+      labels: { app: pii-service }
+    spec:
+      serviceAccountName: app-service-account
+      containers:
+        - name: pii-service
+          image: IMAGE_PLACEHOLDER/pii-service:latest
+          ports:
+            - containerPort: 8082
+          env:
+            - { name: AWS_REGION, value: "us-east-1" }
+            - { name: PII_TABLE, value: "pii-mappings" }
+            # Both empty = Stage 4 skipped. If you set GUARDRAIL_ID, you must
+            # also set GUARDRAIL_VERSION — the service refuses to start on a
+            # half-configured pair (see src/pii-service/main.py).
+            - { name: GUARDRAIL_ID, value: "" }
+            - { name: GUARDRAIL_VERSION, value: "" }
+          readinessProbe:
+            httpGet: { path: /health, port: 8082 }
+            initialDelaySeconds: 5
+          resources:
+            requests: { cpu: "250m", memory: "512Mi" }
+            limits: { cpu: "500m", memory: "1Gi" }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pii-service
+spec:
+  selector: { app: pii-service }
+  ports:
+    - port: 8082
+      targetPort: 8082

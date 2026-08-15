@@ -14,9 +14,9 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT / "src" / "pii-service"))
 sys.path.insert(0, str(REPO_ROOT / "src" / "orchestrator"))
 
-import pseudonymizer  # noqa: E402
 import pipeline  # noqa: E402
 import prompts  # noqa: E402
+import pseudonymizer  # noqa: E402
 
 
 # ── Pseudonymization ──────────────────────────────────────────────────────
@@ -118,6 +118,50 @@ def test_regex_ko_finds_korean_pii():
 def test_regex_skips_masked_national_id():
     found = pipeline._supplement_with_regex([], "SSN: 521-**-****", "en")
     assert not any(item["type"] == "SSN" for item in found)
+
+
+# ── Masking-residue gate ────────────────────────────────────────────────────
+def test_residue_gate_clean_text_passes():
+    pii_data = {"[PERSON_1]": "John Doe", "[SSN_1]": "521-84-6390"}
+    text = "Applicant [PERSON_1] with ID [SSN_1] is approved."
+    assert pipeline._detect_masking_residue(text, pii_data) == set()
+    pipeline._assert_no_masking_residue("test stage", text, pii_data)  # no raise
+
+
+def test_residue_gate_catches_full_value_leak():
+    pii_data = {"[PERSON_1]": "John Doe"}
+    text = "Applicant John Doe is approved."  # masking never ran
+    assert pipeline._detect_masking_residue(text, pii_data) == {"[PERSON_1]"}
+    with pytest.raises(RuntimeError, match="masking residue"):
+        pipeline._assert_no_masking_residue("test stage", text, pii_data)
+
+
+def test_residue_gate_catches_partial_digit_leak():
+    pii_data = {"[RRN_1]": "900720-2345678"}
+    # The token appears (so a naive "did the token get inserted" check would
+    # pass), but the trailing 7-digit run of the original value leaked
+    # elsewhere in the text — e.g. a partial-tokenization failure.
+    text = "Case [RRN_1] cross-referenced against ticket #2345678."
+    assert pipeline._detect_masking_residue(text, pii_data) == {"[RRN_1]"}
+
+
+def test_residue_gate_ignores_unrelated_text():
+    pii_data = {"[RRN_1]": "900720-2345678"}
+    text = "Case [RRN_1] approved. Reference number 999-11-2222 is unrelated."
+    assert pipeline._detect_masking_residue(text, pii_data) == set()
+
+
+# ── Model id -> display label ───────────────────────────────────────────────
+def test_short_model_alias_with_minor_version():
+    assert pipeline._short_model_alias("global.anthropic.claude-sonnet-4-6") == "sonnet-4.6"
+
+
+def test_short_model_alias_without_minor_version():
+    assert pipeline._short_model_alias("global.anthropic.claude-sonnet-5") == "sonnet-5"
+
+
+def test_short_model_alias_passthrough_on_no_match():
+    assert pipeline._short_model_alias("some-other-model-id") == "some-other-model-id"
 
 
 # ── Prompt config integrity ────────────────────────────────────────────────

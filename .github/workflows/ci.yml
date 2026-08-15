@@ -6,6 +6,13 @@ on:
   pull_request:
 
 jobs:
+  sanitized:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check for forbidden internal references
+        run: bash scripts/check-sanitized.sh
+
   python:
     runs-on: ubuntu-latest
     steps:
@@ -16,7 +23,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install ruff pytest
+          pip install "ruff==0.16.3" pytest
           pip install -r src/orchestrator/requirements.txt
           pip install -r src/pii-service/requirements.txt
       - name: Lint

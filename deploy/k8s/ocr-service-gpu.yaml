@@ -1,0 +1,47 @@
+# Optional GPU OCR path (paddleocr-vl) — NOT included in kustomization.yaml's
+# default resource list. Costs money per hour the node/pod runs, whether or
+# not it's serving traffic. To use it:
+#   1. Build deploy/ocr-gpu/ (needs the model weights fetched first — see
+#      that Dockerfile's comments) and push it somewhere your cluster can pull.
+#   2. Have a GPU-capable node group/pool (e.g. an EKS managed nodegroup with
+#      g4dn/g5/g6 instances and the NVIDIA device plugin installed).
+#   3. `kubectl apply -f deploy/k8s/ocr-service-gpu.yaml`
+#   4. Point ocr-service at it: set OCR_ENGINE=paddleocr-vl and
+#      PADDLE_VL_ENDPOINT=http://paddleocr-vl:8080 on the ocr-service
+#      Deployment (deploy/k8s/ocr-service.yaml) and re-apply.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: paddleocr-vl
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: paddleocr-vl }
+  template:
+    metadata:
+      labels: { app: paddleocr-vl }
+    spec:
+      containers:
+        - name: paddleocr-vl
+          image: IMAGE_PLACEHOLDER/paddleocr-vl:latest
+          ports:
+            - containerPort: 8080
+          resources:
+            requests:
+              cpu: "2"
+              memory: "8Gi"
+              nvidia.com/gpu: "1"
+            limits:
+              cpu: "4"
+              memory: "16Gi"
+              nvidia.com/gpu: "1"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: paddleocr-vl
+spec:
+  selector: { app: paddleocr-vl }
+  ports:
+    - port: 8080
+      targetPort: 8080

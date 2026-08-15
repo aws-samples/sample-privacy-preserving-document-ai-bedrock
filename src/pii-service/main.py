@@ -7,6 +7,8 @@ It is CPU-only and has no ML model dependency.
 Endpoints:
   POST /pseudonymize  convert detected PII (type/original pairs) into [PERSON_1]-style tokens
   POST /guardrails    double-check masked text with Amazon Bedrock Guardrails
+                      (returns skipped=True if unconfigured, degraded=True if
+                      the Guardrails call itself failed)
   POST /store         persist token -> original mappings in DynamoDB (with TTL)
   POST /reassemble    restore tokens in analysis output (national IDs stay partially masked)
   GET  /health
@@ -21,9 +23,8 @@ import boto3
 from boto3.dynamodb.conditions import Key
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
-
 from pseudonymizer import LABEL_DESCRIPTIONS, pseudonymize_text, reassemble
+from pydantic import BaseModel, Field
 
 # Detection type label (from the sLLM) -> internal detection label used by the
 # pseudonymizer. Keep in sync with prompts.VALID_PII_TYPES (orchestrator).
@@ -61,9 +62,24 @@ app = FastAPI(
 # ── Configuration ──
 AWS_REGION = os.environ.get("AWS_REGION", "us-east-1")
 GUARDRAIL_ID = os.environ.get("GUARDRAIL_ID", "")
-GUARDRAIL_VERSION = os.environ.get("GUARDRAIL_VERSION", "DRAFT")
+GUARDRAIL_VERSION = os.environ.get("GUARDRAIL_VERSION", "")
 PII_TABLE = os.environ.get("PII_TABLE", "pii-mappings")
 PII_TTL_SECONDS = int(os.environ.get("PII_TTL_SECONDS", "3600"))
+
+# Fail closed on a half-configured Guardrail rather than silently guessing: a
+# GUARDRAIL_ID with no explicit GUARDRAIL_VERSION would otherwise need a
+# default version, and pinning that default here would make what verification
+# actually ran an implicit fact buried in code instead of an explicit config
+# choice. Both empty is fine — Stage 4 is skipped entirely (see /guardrails).
+if GUARDRAIL_ID and not GUARDRAIL_VERSION:
+    raise RuntimeError(
+        "GUARDRAIL_ID is set but GUARDRAIL_VERSION is empty — refusing to start "
+        "rather than guess a version. Set GUARDRAIL_VERSION explicitly (e.g. the "
+        "numbered version the CDK stack published, or \"DRAFT\" if that is truly "
+        "what you intend to verify against)."
+    )
+if GUARDRAIL_VERSION and not GUARDRAIL_ID:
+    raise RuntimeError("GUARDRAIL_VERSION is set but GUARDRAIL_ID is empty — half-configured Guardrail.")
 
 bedrock_runtime = boto3.client("bedrock-runtime", region_name=AWS_REGION)
 dynamodb = boto3.resource("dynamodb", region_name=AWS_REGION)
@@ -160,8 +176,18 @@ async def verify_guardrails(req: GuardrailsRequest):
         verified_text = outputs[0].get("text", req.masked_text) if outputs else req.masked_text
         return JSONResponse({"extra_pii": extra_pii, "verified_text": verified_text})
     except Exception as e:
-        # Guardrails failure is non-fatal — pass the masked text through.
-        return JSONResponse({"extra_pii": [], "verified_text": req.masked_text, "error": str(e)})
+        # Guardrails failure is non-fatal — pass the masked text through. This is
+        # a *different* outcome from "skipped" above (GUARDRAIL_ID unset, never
+        # called AWS at all): here Guardrails was configured and the call itself
+        # failed (bad ARN/version, missing permission, throttling, network). The
+        # orchestrator's masking-residue gate still runs on this text before it
+        # reaches Bedrock, but that gate only catches PII Stage 3 already knew
+        # about — this failure means Guardrails' independent check didn't happen.
+        logger.warning("Guardrails call failed (degraded — text passes through unverified): %s", e)
+        return JSONResponse({
+            "extra_pii": [], "verified_text": req.masked_text,
+            "degraded": True, "error": str(e),
+        })
 
 
 @app.post("/store")
